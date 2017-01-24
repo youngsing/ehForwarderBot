@@ -99,6 +99,7 @@ class WeChatChannel(EFBChannel):
     channel_id = "eh_wechat_slave"
     channel_type = ChannelType.Slave
     supported_message_types = {MsgType.Text, MsgType.Sticker, MsgType.Image, MsgType.File, MsgType.Video, MsgType.Link}
+    exit_event = None
     users = {}
     logger = logging.getLogger("plugins.%s.WeChatChannel" % channel_id)
     qr_callback = ""
@@ -109,8 +110,8 @@ class WeChatChannel(EFBChannel):
                          "blogapp", "facebookapp", "masssendapp", "meishiapp", "feedsapp", "voip", "blogappweixin",
                          "weixin"]
 
-    def __init__(self, queue):
-        super().__init__(queue)
+    def __init__(self, queue, auth_mutex):
+        super().__init__(queue, auth_mutex)
         self.itchat = itchat.new_instance()
         itchat.set_logging(showOnCmd=False)
         self.itchat_msg_register()
@@ -133,7 +134,7 @@ class WeChatChannel(EFBChannel):
             QR = 'Tap "Confirm" to continue.'
         elif status == 200:
             QR = "Successfully authorized."
-        else:
+        elif uuid != self.qr_uuid:
             # 0: First QR code
             # 408: Updated QR code
             QR = "WeChat: Scan QR code with WeChat to continue. (%s, %s)\n" % (uuid, status)
@@ -153,6 +154,7 @@ class WeChatChannel(EFBChannel):
             QR += "\nIf you cannot read the QR code above, " \
                   "Please generate a QR code with any tool with the following URL:\n" \
                   "https://login.weixin.qq.com/l/" + uuid
+            self.qr_uuid = uuid
         self.logger.critical(QR)
 
     def master_qr_code(self, uuid, status, qrcode):
@@ -339,19 +341,21 @@ class WeChatChannel(EFBChannel):
             return self.search_user(UserName, uid, uin, name, ActualUserName, refresh=True)
         return result
 
-    def poll(self):
-        self.itchat.auto_login(enableCmdQR=2,
-                               hotReload=True,
-                               statusStorageDir="storage/%s.pkl" % self.channel_id,
-                               exitCallback=self.exit_callback,
-                               qrCallback=getattr(self, self.qr_callback))
+    def poll(self, exit_event):
+        self.exit_event = exit_event
+        with self.auth_mutex:
+            self.itchat.auto_login(enableCmdQR=2,
+                                   hotReload=True,
+                                   statusStorageDir="storage/%s.pkl" % self.channel_id,
+                                   exitCallback=self.exit_callback,
+                                   qrCallback=getattr(self, self.qr_callback))
         self.usersdata = self.itchat.get_friends(True) + self.itchat.get_chatrooms()
 
-        while self.itchat.alive and not self.stop_polling:
+        while self.itchat.alive and not exit_event.wait(0.1):
             self.itchat.configured_reply()
 
         if self.itchat.useHotReload:
-            self.itchat.dump_login_status()
+            self.itchat.dump_login_status("storage/%s.pkl" % self.channel_id)
 
         self.logger.debug("%s (%s) gracefully stopped.", self.channel_name, self.channel_id)
 
@@ -818,7 +822,7 @@ class WeChatChannel(EFBChannel):
     # Command functions
 
     def start_polling_thread(self):
-        thread = threading.Thread(target=self.poll)
+        thread = threading.Thread(target=self.poll, args=(self.exit_event,))
         thread.start()
         return "Reconnecting..."
 

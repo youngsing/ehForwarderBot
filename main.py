@@ -5,7 +5,6 @@ import logging
 import argparse
 import sys
 import signal
-from channel import EFBChannel
 
 if sys.version_info.major < 3:
     raise Exception("Python 3.x is required. Your version is %s." % sys.version)
@@ -32,20 +31,17 @@ master = None
 master_thread = None
 slave_threads = None
 
+auth_mutex = None
+exit_event = None
+
 
 def stop_gracefully(*args, **kwargs):
-    l = logging.getLogger("ehForwarderBot")
-    if isinstance(master, EFBChannel):
-        master.stop_polling = True
-        l.debug("Stop signal sent to master: %s" % master.channel_name)
-        while master_thread.is_alive():
-            pass
-    for i in slaves:
-        if isinstance(slaves[i], EFBChannel):
-            slaves[i].stop_polling = True
-            l.debug("Stop signal sent to slave: %s" % slaves[i].channel_name)
-            while slave_threads[i].is_alive():
-                pass
+    """
+    Stop the program gracefully
+    """
+    exit_event.set()
+    master_thread.join()
+    map(threading.Thread.join, slave_threads)
     sys.exit(0)
 
 
@@ -69,9 +65,12 @@ def init():
     """
     Initialize all channels.
     """
-    global q, slaves, master, master_thread, slave_threads
+    global q, slaves, master, master_thread, slave_threads, auth_mutex, exit_event
     # Init Queue
     q = queue.Queue()
+    # Init thread-safe variables
+    auth_mutex = threading.Lock()
+    exit_event = threading.Event()
     # Initialize Plug-ins Library
     # (Load libraries and modules and init them with Queue `q`)
     l = logging.getLogger("ehForwarderBot")
@@ -79,16 +78,16 @@ def init():
     for i in config.slave_channels:
         l.critical("\x1b[0;37;46m Initializing slave %s... \x1b[0m" % str(i))
         obj = getattr(__import__(i[0], fromlist=i[1]), i[1])
-        slaves[obj.channel_id] = obj(q)
+        slaves[obj.channel_id] = obj(q, auth_mutex)
         l.critical("\x1b[0;37;42m Slave channel %s (%s) initialized. \x1b[0m" % (obj.channel_name, obj.channel_id))
     l.critical("\x1b[0;37;46m Initializing master %s... \x1b[0m" % str(config.master_channel))
     master = getattr(__import__(config.master_channel[0], fromlist=config.master_channel[1]), config.master_channel[1])(
-        q, slaves)
+        q, auth_mutex, slaves)
     l.critical("\x1b[0;37;42m Master channel %s (%s) initialized. \x1b[0m" % (master.channel_name, master.channel_id))
 
     l.critical("\x1b[1;37;42m All channels initialized. \x1b[0m")
-    master_thread = threading.Thread(target=master.poll)
-    slave_threads = {key: threading.Thread(target=slaves[key].poll) for key in slaves}
+    master_thread = threading.Thread(target=master.poll, args=(exit_event,))
+    slave_threads = {key: threading.Thread(target=slaves[key].poll, args=(exit_event,)) for key in slaves}
 
 
 def poll():

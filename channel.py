@@ -38,11 +38,12 @@ class EFBChannel:
     channel_id = "emptyChannel"
     channel_type = ChannelType.Slave
     queue = None
+    auth_mutex = None
     supported_message_types = set()
-    stop_polling = False
 
-    def __init__(self, queue):
+    def __init__(self, queue, auth_mutex):
         self.queue = queue
+        self.auth_mutex = auth_mutex
 
     def get_extra_functions(self):
         """Get a list of extra functions
@@ -62,7 +63,7 @@ class EFBChannel:
     def send_message(self, *args, **kwargs):
         return "Not implemented"
 
-    def poll(self, *args, **kwargs):
+    def poll(self, exit_event, *args, **kwargs):
         return "Not implemented"
 
     def get_chats(self, *args, **kwargs):
