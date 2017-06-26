@@ -11,7 +11,7 @@ class ETM_Webhook(TelegramChannel):
         copy from
         https://github.com/RoyXiang/ehForwarderBot/commit/dc43f8106535d3f6576ab6597864a12a9b7bdc1b
         """
-        webhook_url = getattr(config, 'webhook_url')
+        webhook_url = getattr(config, 'webhook_url', '')
         if webhook_url != '':
             token = getattr(config, self.channel_id)['token']
             self.bot.start_webhook(listen='0.0.0.0', port=5002, url_path=token)
