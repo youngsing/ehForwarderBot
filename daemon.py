@@ -281,9 +281,9 @@ def help():
 
 
 def transcript(path, reset=False):
-    if reset:
-        with open(path, "w") as f:
-            f.write("")
+    # if reset:
+    #     with open(path, "w") as f:
+    #         f.write("")
 
     l = ["Output is saved to '%s', showing output now." % path,
          "Press ^C (Control+C on Mac, Ctrl+C otherwise) to hide."]
